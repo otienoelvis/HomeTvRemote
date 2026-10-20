@@ -7,6 +7,10 @@ over your local Wi-Fi network.
 No cloud account, no MQTT broker, no internet access required — everything stays
 on your LAN.
 
+> **Download:** grab the latest signed APK from the
+> [Releases page](https://github.com/otienoelvis/HomeTvRemote/releases/latest)
+> (e.g. [HomeTv 1.0.0](https://github.com/otienoelvis/HomeTvRemote/releases/tag/v1.0.0)).
+
 ---
 
 ## Features
