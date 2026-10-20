@@ -73,6 +73,37 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 > **Note:** if Android Studio is your only JDK, point Gradle at its embedded JBR:
 > `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew ...`
 
+## Releases
+
+CI builds and publishes a signed release APK. Push a tag like `v1.0.0`, or run
+the **Release** workflow manually from the Actions tab. The workflow runs the
+unit tests, builds `app-release.apk` and attaches it (plus a `.sha256`
+checksum) to a GitHub Release named `HomeTv <version>`.
+
+The version comes from the tag (`v1.0.0` → `1.0.0`) or the manual input;
+`versionCode` is the CI run number.
+
+The build is signed with a release keystore stored as repository secrets
+(*Settings → Secrets and variables → Actions*):
+
+| Secret | Value |
+| --- | --- |
+| `SIGNING_KEYSTORE_BASE64` | `base64` of the `.keystore`/`.jks` file |
+| `SIGNING_STORE_PASSWORD` | Keystore password |
+| `SIGNING_KEY_ALIAS` | Key alias |
+| `SIGNING_KEY_PASSWORD` | Key password |
+
+Create and export a keystore once:
+
+```bash
+keytool -genkeypair -v -keystore release.keystore -alias hometv \
+  -keyalg RSA -keysize 2048 -validity 10000
+base64 -i release.keystore | pbcopy    # paste into SIGNING_KEYSTORE_BASE64
+```
+
+Without these secrets a local `./gradlew :app:assembleRelease` still works —
+it just produces an unsigned APK.
+
 ## Using the app
 
 1. Launch **HomeTv** and grant the nearby-devices permission when prompted.
