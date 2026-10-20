@@ -93,6 +93,10 @@ The build is signed with a release keystore stored as repository secrets
 | `SIGNING_KEY_ALIAS` | Key alias |
 | `SIGNING_KEY_PASSWORD` | Key password |
 
+> Modern `keytool` produces PKCS12 keystores, which require the key password to
+> be **identical** to the store password — otherwise packaging fails with
+> `Given final block not properly padded`.
+
 Create and export a keystore once:
 
 ```bash
