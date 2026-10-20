@@ -69,6 +69,23 @@ jobs:
           printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
           echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
 
+      - name: Verify keystore
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+        run: |
+          echo "Keystore file sha256: $(sha256sum "$SIGNING_KEYSTORE_PATH" | cut -d' ' -f1)"
+          echo "Keystore of the repo owner's key (should match): 040fe273a6db80c7cb9fc5c4a760ccf5aa1448105ba493898f3eade106ae18de"
+          if ! keytool -list -keystore "$SIGNING_KEYSTORE_PATH" -storepass "$SIGNING_STORE_PASSWORD" 2>/dev/null | grep -E "Keystore type|Alias name"; then
+            echo "::error::SIGNING_STORE_PASSWORD does not open the decoded keystore (or SIGNING_KEYSTORE_BASE64 holds the wrong file)."
+            exit 1
+          fi
+          if ! keytool -list -keystore "$SIGNING_KEYSTORE_PATH" -storepass "$SIGNING_STORE_PASSWORD" -alias "$SIGNING_KEY_ALIAS" >/dev/null 2>&1; then
+            echo "::error::Alias '$SIGNING_KEY_ALIAS' not found in the keystore."
+            exit 1
+          fi
+          echo "Keystore, store password and alias OK. (PKCS12: SIGNING_KEY_PASSWORD must equal SIGNING_STORE_PASSWORD.)"
+
       - name: Run unit tests
         run: ./gradlew :app:testDebugUnitTest --stacktrace
 
