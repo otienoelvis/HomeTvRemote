@@ -41,10 +41,12 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
       - name: Install Android platform 36.1
-        run: sdkmanager "platforms;android-36.1" "build-tools;36.1.0"
+        run: sdkmanager --install "platforms;android-36.1" "build-tools;36.1.0"
 
       - name: Normalize version
         run: |
@@ -90,7 +92,7 @@ jobs:
             exit 1
           fi
           cp "$apk" "dist/HomeTv-$VERSION_NAME.apk"
-          (cd dist && shasum -a 256 "HomeTv-$VERSION_NAME.apk" > "HomeTv-$VERSION_NAME.apk.sha256")
+          (cd dist && sha256sum "HomeTv-$VERSION_NAME.apk" > "HomeTv-$VERSION_NAME.apk.sha256")
           ls -l dist
 
       - name: Upload artifact
