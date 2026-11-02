@@ -31,9 +31,13 @@ class RemoteViewModel(
 
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
     private var scanTimeoutJob: Job? = null
+    private var autoConnectJob: Job? = null
+    private var autoConnectEnabled = true
+    private var initialAutoConnectAttempted = false
 
     init {
         observeRepository()
+        observeNetwork()
     }
 
     private fun observeRepository() {
@@ -90,6 +94,46 @@ class RemoteViewModel(
         viewModelScope.launch {
             repository.logs.collect { message ->
                 addLog(message)
+            }
+        }
+    }
+
+    private fun observeNetwork() {
+        viewModelScope.launch {
+            var previous: Boolean? = null
+            repository.networkAvailable.collect { available ->
+                val wasAvailable = previous
+                previous = available
+                if (wasAvailable == false && available) {
+                    addLog("Local network is back; trying the last TV")
+                    autoConnectLastDevice()
+                }
+            }
+        }
+    }
+
+    fun onAppForeground() {
+        if (initialAutoConnectAttempted) return
+        initialAutoConnectAttempted = true
+        autoConnectLastDevice()
+    }
+
+    fun autoConnectLastDevice() {
+        if (!autoConnectEnabled) return
+        val status = _uiState.value.connectionStatus
+        if (status == ConnectionStatus.CONNECTED ||
+            status == ConnectionStatus.CONNECTING ||
+            status == ConnectionStatus.PAIRING
+        ) {
+            return
+        }
+        if (autoConnectJob?.isActive == true) return
+
+        autoConnectJob = viewModelScope.launch {
+            addLog("Trying to auto-connect to the last used TV")
+            val result = repository.autoConnectLastDevice()
+            if (result.isFailure) {
+                addLog("Auto-connect: ${result.exceptionOrNull()?.message ?: "no TV reachable"}")
             }
         }
     }
@@ -152,6 +196,8 @@ class RemoteViewModel(
             addLog("Select a TV first")
             return
         }
+        autoConnectJob?.cancel()
+        autoConnectEnabled = true
         _uiState.update { it.copy(isDevicesSheetVisible = false) }
         val state = _uiState.value
         if (state.connectionStatus == ConnectionStatus.CONNECTED &&
@@ -174,6 +220,8 @@ class RemoteViewModel(
             addLog("Select a TV first")
             return
         }
+        autoConnectJob?.cancel()
+        autoConnectEnabled = true
         if (device.isPaired) {
             addLog("${device.name} is already paired")
             connectSelected()
@@ -234,6 +282,7 @@ class RemoteViewModel(
                         pairingPinInput = ""
                     )
                 }
+                autoConnectEnabled = true
                 addLog("Paired successfully with ${paired.name}")
             } else {
                 addLog("Pairing failed: ${result.exceptionOrNull()?.message}")
@@ -266,6 +315,8 @@ class RemoteViewModel(
     }
 
     fun connectManualIp() {
+        autoConnectJob?.cancel()
+        autoConnectEnabled = true
         val raw = _uiState.value.manualIpInput.trim()
         val host = raw
             .removePrefix("http://")
@@ -308,6 +359,8 @@ class RemoteViewModel(
     }
 
     fun toggleProtocol(protocol: ProtocolType) {
+        autoConnectJob?.cancel()
+        autoConnectEnabled = true
         val state = _uiState.value
         _uiState.update { it.copy(activeProtocol = protocol) }
         if (state.activeProtocol == protocol && state.connectionStatus == ConnectionStatus.CONNECTED) {
@@ -321,6 +374,9 @@ class RemoteViewModel(
     }
 
     fun disconnect() {
+        autoConnectJob?.cancel()
+        autoConnectJob = null
+        autoConnectEnabled = false
         viewModelScope.launch {
             repository.disconnect()
             addLog("Disconnected")
@@ -329,6 +385,8 @@ class RemoteViewModel(
 
     fun forgetSelected() {
         val device = _uiState.value.selectedDevice ?: return
+        autoConnectJob?.cancel()
+        autoConnectJob = null
         viewModelScope.launch {
             repository.forgetDevice(device)
             _uiState.update { it.copy(selectedDevice = null) }

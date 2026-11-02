@@ -5,6 +5,7 @@ import com.example.hometv.domain.model.ProtocolType
 import com.example.hometv.domain.model.RemoteCommand
 import com.example.hometv.domain.model.TvDevice
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Discovery, pairing and command transport for Android TV / Google TV devices.
@@ -15,6 +16,7 @@ interface TvRemoteRepository {
     val activeProtocol: Flow<ProtocolType>
     val activeDevice: Flow<TvDevice?>
     val logs: Flow<String>
+    val networkAvailable: StateFlow<Boolean>
 
     fun startDiscovery()
     fun stopDiscovery()
@@ -24,6 +26,7 @@ interface TvRemoteRepository {
     suspend fun cancelPairing()
 
     suspend fun connect(device: TvDevice, protocol: ProtocolType): Result<Unit>
+    suspend fun autoConnectLastDevice(): Result<Unit>
     suspend fun connectManualIp(ipAddress: String, protocol: ProtocolType): Result<Unit>
     suspend fun disconnect()
     suspend fun forgetDevice(device: TvDevice)

@@ -31,6 +31,9 @@ on your LAN.
 - **Multiple TV support** — every paired TV is remembered (persisted as JSON in
   `SharedPreferences`, keyed by the TV certificate fingerprint) and can be
   reconnected with one tap.
+- **Auto-connect** — when the app opens (or the phone reconnects to Wi-Fi), it
+  automatically reconnects to the most recently used TV, falling back to mDNS
+  discovery when the saved address has changed.
 - **Manual IP entry** for TVs that do not respond to mDNS.
 - **Optional ADB transport** (advanced) — for TVs where the official Remote
   Service is unavailable but ADB over TCP is enabled, using

@@ -66,13 +66,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        Log.d(TAG, "MainActivity onStart, starting scan")
+        Log.d(TAG, "MainActivity onStart, trying auto-connect and scan")
         try {
             if (viewModel?.uiState?.value?.connectionStatus != ConnectionStatus.CONNECTED) {
+                viewModel?.onAppForeground()
                 viewModel?.startScan()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error starting scan", e)
+            Log.e(TAG, "Error starting auto-connect/scan", e)
         }
     }
 

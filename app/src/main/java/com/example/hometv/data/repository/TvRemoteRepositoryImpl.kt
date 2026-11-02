@@ -3,6 +3,7 @@ package com.example.hometv.data.repository
 import android.content.Context
 import android.util.Log
 import com.example.hometv.data.network.AdbTransport
+import com.example.hometv.data.network.NetworkMonitor
 import com.example.hometv.data.network.NsdDiscoveryManager
 import com.example.hometv.data.pairing.PairedTvStore
 import com.example.hometv.data.pairing.PairingManager
@@ -29,10 +30,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 class TvRemoteRepositoryImpl(context: Context) : TvRemoteRepository {
 
@@ -42,6 +45,7 @@ class TvRemoteRepositoryImpl(context: Context) : TvRemoteRepository {
         private const val COMMAND_PORT = 6466
         private const val ADB_PORT = 5555
         private const val MAX_LOGS = 60
+        private const val AUTO_CONNECT_DISCOVERY_TIMEOUT_MS = 20_000L
     }
 
     private val appContext = context.applicationContext
@@ -50,6 +54,7 @@ class TvRemoteRepositoryImpl(context: Context) : TvRemoteRepository {
 
     private val identity = TvClientIdentity(appContext)
     private val pairedStore = PairedTvStore(appContext)
+    private val networkMonitor = NetworkMonitor(appContext)
 
     private val _logs = MutableSharedFlow<String>(replay = MAX_LOGS, extraBufferCapacity = 32)
     override val logs: SharedFlow<String> = _logs.asSharedFlow()
@@ -74,6 +79,9 @@ class TvRemoteRepositoryImpl(context: Context) : TvRemoteRepository {
     private val _activeDevice = MutableStateFlow<TvDevice?>(null)
     override val activeDevice: StateFlow<TvDevice?> = _activeDevice.asStateFlow()
 
+    private val _networkAvailable = MutableStateFlow(networkMonitor.isAvailable())
+    override val networkAvailable: StateFlow<Boolean> = _networkAvailable.asStateFlow()
+
     private var discoveryJob: Job? = null
 
     init {
@@ -84,6 +92,15 @@ class TvRemoteRepositoryImpl(context: Context) : TvRemoteRepository {
                 mergeDevices((discovered + manual).distinctBy { it.hostAddress }, paired)
             }.collect { devices ->
                 _devices.value = devices
+            }
+        }
+
+        scope.launch {
+            networkMonitor.availability.collect { available ->
+                if (_networkAvailable.value != available) {
+                    addLog(if (available) "Local network available" else "Local network unavailable")
+                }
+                _networkAvailable.value = available
             }
         }
 
@@ -261,6 +278,77 @@ class TvRemoteRepositoryImpl(context: Context) : TvRemoteRepository {
         return result
     }
 
+    override suspend fun autoConnectLastDevice(): Result<Unit> {
+        val currentStatus = _connectionStatus.value
+        if (currentStatus == ConnectionStatus.CONNECTED ||
+            currentStatus == ConnectionStatus.CONNECTING ||
+            currentStatus == ConnectionStatus.PAIRING
+        ) {
+            return Result.success(Unit)
+        }
+        if (!_networkAvailable.value) {
+            addLog("Auto-connect skipped: no local network")
+            return Result.failure(IllegalStateException("No local network available"))
+        }
+
+        val last = pairedStore.lastConnected()
+        if (last == null) {
+            addLog("Auto-connect skipped: no previously connected TV")
+            return Result.failure(IllegalStateException("No paired TV found"))
+        }
+
+        addLog("Auto-connecting to last used TV: ${last.name} (${last.hostAddress})")
+        startDiscovery()
+
+        val savedDevice = last.toDevice(isOnline = true)
+        val directResult = connect(savedDevice, ProtocolType.OFFICIAL_TLS)
+        if (directResult.isSuccess) {
+            addLog("Auto-connected via saved address")
+            return Result.success(Unit)
+        }
+
+        addLog("Saved address unreachable; searching on the network...")
+
+        val resolved = withTimeoutOrNull(AUTO_CONNECT_DISCOVERY_TIMEOUT_MS) {
+            combine(_discoveredDevices, _pairedDevices) { discovered, paired ->
+                val pairedMatch = paired.firstOrNull { it.id == last.id }
+                if (pairedMatch == null) return@combine null
+                val discoveredMatch = discovered.firstOrNull { device ->
+                    device.id == pairedMatch.id ||
+                        device.hostAddress == pairedMatch.hostAddress ||
+                        device.name.equals(pairedMatch.name, ignoreCase = true)
+                }
+                if (discoveredMatch != null && discoveredMatch.hostAddress.isNotBlank()) {
+                    pairedMatch.toDevice(
+                        isOnline = true,
+                        hostAddress = discoveredMatch.hostAddress,
+                        serviceType = discoveredMatch.serviceType,
+                        lastSeen = pairedMatch.lastSeen
+                    ) to discoveredMatch.hostAddress
+                } else {
+                    null
+                }
+            }.first { it != null }
+        }
+
+        if (resolved == null) {
+            addLog("Auto-connect failed: TV not found via discovery")
+            restoreDiscoveryStatus()
+            return Result.failure(IllegalStateException("Last TV not reachable on network"))
+        }
+
+        val (resolvedDevice, host) = resolved
+        addLog("Found ${resolvedDevice.name} at $host; retrying auto-connect")
+        val retryResult = connect(resolvedDevice, ProtocolType.OFFICIAL_TLS)
+        if (retryResult.isSuccess) {
+            addLog("Auto-connected via discovered address")
+            return Result.success(Unit)
+        }
+
+        restoreDiscoveryStatus()
+        return retryResult
+    }
+
     override suspend fun connectManualIp(ipAddress: String, protocol: ProtocolType): Result<Unit> {
         val host = ipAddress.removePrefix("http://").removePrefix("https://").substringBefore("/").trim()
         if (host.isBlank()) {
@@ -322,6 +410,15 @@ class TvRemoteRepositoryImpl(context: Context) : TvRemoteRepository {
         v2Transport.close()
         adbTransport.disconnect()
         scope.cancel()
+    }
+
+    private fun restoreDiscoveryStatus() {
+        if (_connectionStatus.value != ConnectionStatus.ERROR) return
+        _connectionStatus.value = if (_discoveredDevices.value.isEmpty()) {
+            ConnectionStatus.DISCOVERING
+        } else {
+            ConnectionStatus.FOUND
+        }
     }
 
     private fun mergeDevices(discovered: List<TvDevice>, paired: List<PairedTv>): List<TvDevice> {

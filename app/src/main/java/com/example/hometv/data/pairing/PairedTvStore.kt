@@ -51,6 +51,13 @@ class PairedTvStore(context: Context) {
         }
     }
 
+    /**
+     * The TV that most recently completed a successful connection.
+     */
+    @Synchronized
+    fun lastConnected(): PairedTv? =
+        getAll().filter { it.lastSeen > 0L }.maxByOrNull { it.lastSeen }
+
     @Synchronized
     fun upsert(device: PairedTv): List<PairedTv> {
         val updated = getAll().filterNot { it.id == device.id }.toMutableList()
